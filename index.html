@@ -1,29 +1,219 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>OKPC Buddy Check-In</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background-color: #1e293b;
+<script>
+    // PASTE YOUR APPS SCRIPT /exec URL BELOW:
+    const API_URL = "https://script.google.com/macros/s/AKfycbwEPjkiQ9otKQoSYEtlkWEdDLD8MTR6rXzBsTH6c7vOy8uSmtogIAC3-mBH3rDrPk_hJQ/exec";
+
+    let appData = { activities: [], activeDates: [], participants: [] };
+    let currentRoleFilter = 'ALL';
+
+    window.onload = loadData;
+
+    function getPin(forcePrompt = false) {
+      let pin = localStorage.getItem('okpc_checkin_pin');
+      if (!pin || forcePrompt) {
+        pin = prompt('Enter OKPC Check-In PIN:');
+        if (pin !== null) {
+          pin = pin.trim();
+          localStorage.setItem('okpc_checkin_pin', pin);
+        }
+      }
+      return pin || '';
     }
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      display: block;
+
+    async function loadData() {
+      const pin = getPin(false);
+      if (!pin) {
+        document.getElementById('summaryText').textContent = 'PIN required. Tap ↻ Sync Sheet to enter PIN.';
+        return;
+      }
+
+      document.getElementById('summaryText').textContent = 'Syncing with Google Sheet...';
+      try {
+        const res = await fetch(`${API_URL}?pin=${encodeURIComponent(pin)}`, { method: 'GET', redirect: 'follow' });
+        const data = await res.json();
+
+        if (data.authError) {
+          localStorage.removeItem('okpc_checkin_pin');
+          alert('Incorrect PIN. Please try again.');
+          const retryPin = getPin(true);
+          if (retryPin) return loadData();
+          document.getElementById('summaryText').textContent = 'Locked. Tap ↻ Sync Sheet to enter PIN.';
+          return;
+        }
+
+        appData = data;
+        populateFilters();
+        renderCards();
+      } catch (err) {
+        document.getElementById('summaryText').textContent = 'Error syncing. Tap ↻ Sync Sheet.';
+        console.error(err);
+      }
     }
-  </style>
-</head>
-<body>
-  <iframe src="https://script.google.com/macros/s/AKfycbwEPjkiQ9otKQoSYEtlkWEdDLD8MTR6rXzBsTH6c7vOy8uSmtogIAC3-mBH3rDrPk_hJQ/exec" allow="clipboard-read; clipboard-write"></iframe>
-</body>
-</html>
+
+    function populateFilters() {
+      const dateSel = document.getElementById('dateFilter');
+      const prevDate = dateSel.value;
+      dateSel.innerHTML = '';
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+      let defaultDate = appData.activeDates[0] || '';
+
+      appData.activeDates.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d; opt.textContent = d;
+        dateSel.appendChild(opt);
+        if (d.startsWith(todayIso)) defaultDate = d;
+      });
+
+      if (prevDate && appData.activeDates.includes(prevDate)) {
+        dateSel.value = prevDate;
+      } else if (defaultDate) {
+        dateSel.value = defaultDate;
+      }
+
+      const actSel = document.getElementById('activityFilter');
+      actSel.innerHTML = '<option value="ALL">All Activities</option>';
+      appData.activities.forEach(a => {
+        actSel.innerHTML += `<option value="${a}">${a}</option>`;
+      });
+    }
+
+    function setRoleFilter(role, el) {
+      currentRoleFilter = role;
+      document.querySelectorAll('.role-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      renderCards();
+    }
+
+    function renderCards() {
+      const selectedDate = document.getElementById('dateFilter').value;
+      const selectedAct = document.getElementById('activityFilter').value;
+      const query = document.getElementById('searchInput').value.trim().toLowerCase();
+      const container = document.getElementById('cardsContainer');
+      container.innerHTML = '';
+
+      const filtered = appData.participants.filter(p => {
+        if (p.eventDate !== selectedDate) return false;
+        if (selectedAct !== 'ALL' && p.activity !== selectedAct) return false;
+        if (currentRoleFilter !== 'ALL' && p.role !== currentRoleFilter) return false;
+        if (query && !p.studentName.toLowerCase().includes(query)) return false;
+        return true;
+      });
+
+      let totalSlots = 0, checkedSlots = 0;
+      filtered.forEach(p => p.slots.forEach(s => {
+        totalSlots++;
+        if (s.checkedIn) checkedSlots++;
+      }));
+
+      document.getElementById('summaryText').textContent =
+        `${filtered.length} signed-up participants (${checkedSlots}/${totalSlots} session slots checked in)`;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:40px 16px;color:#64748b;">No signed-up participants found for this date/filter.</div>';
+        return;
+      }
+
+      filtered.forEach((p, idx) => {
+        const allChecked = p.slots.every(s => s.checkedIn);
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const slotsHtml = p.slots.map((s, sIdx) => {
+          const inputId = `chk_${idx}_${sIdx}`;
+          if (s.checkedIn) {
+            return `
+              <div class="slot-item checked-in">
+                <div class="slot-left">
+                  <input type="checkbox" checked disabled>
+                  <span>${s.timeSlot}</span>
+                </div>
+                <span class="slot-status">✓ Checked In</span>
+              </div>`;
+          }
+          return `
+            <label class="slot-item" for="${inputId}">
+              <div class="slot-left">
+                <input type="checkbox" id="${inputId}" data-pidx="${idx}" value="${s.timeSlot}" checked>
+                <span>${s.timeSlot}</span>
+              </div>
+              <span style="font-size:12px;color:#64748b;">Signed Up</span>
+            </label>`;
+          }
+        ).join('');
+
+        card.innerHTML = `
+          <div>
+            <span class="student-name">${p.studentName}</span>
+            <span class="badge ${p.role}">${p.role}</span>
+            <div class="meta-sub">Grade: ${p.grade || 'N/A'} • Activity: ${p.activity} ${p.parentPhone ? '• ' + p.parentPhone : ''}</div>
+          </div>
+          <div class="slots-list">${slotsHtml}</div>
+          <button class="btn-checkin ${allChecked ? 'all-done' : ''}"
+                  ${allChecked ? 'disabled' : ''}
+                  onclick="submitCardCheckIn(${idx}, this)">
+            ${allChecked ? '✓ All Signed-Up Slots Checked In' : 'Check In Selected Slot(s)'}
+          </button>
+        `;
+        container.appendChild(card);
+        card.querySelector('.btn-checkin').participantRef = p;
+      });
+    }
+
+    async function submitCardCheckIn(cardIdx, btnEl) {
+      const p = btnEl.participantRef;
+      const checkboxes = document.querySelectorAll(`input[data-pidx="${cardIdx}"]:checked`);
+      const selectedSlots = Array.from(checkboxes).map(cb => cb.value);
+
+      if (selectedSlots.length === 0) {
+        alert('Please select at least one signed-up time slot.');
+        return;
+      }
+
+      btnEl.disabled = true;
+      btnEl.textContent = 'Saving...';
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            pin: getPin(false),
+            eventDate: p.eventDate,
+            studentName: p.studentName,
+            grade: p.grade,
+            role: p.role,
+            activity: p.activity,
+            parentEmail: p.parentEmail,
+            parentPhone: p.parentPhone,
+            selectedSlots: selectedSlots
+          })
+        });
+        const data = await res.json();
+        if (data.authError) {
+          localStorage.removeItem('okpc_checkin_pin');
+          alert('Invalid PIN.');
+          btnEl.disabled = false;
+          btnEl.textContent = 'Check In Selected Slot(s)';
+          return;
+        }
+        if (data.success) {
+          p.slots.forEach(s => {
+            if (selectedSlots.includes(s.timeSlot)) {
+              s.checkedIn = true;
+              s.timestamp = data.timestamp;
+            }
+          });
+          renderCards();
+        } else {
+          alert('Error saving check-in: ' + (data.error || 'Unknown'));
+          btnEl.disabled = false;
+          btnEl.textContent = 'Check In Selected Slot(s)';
+        }
+      } catch (err) {
+        alert('Network error while saving check-in.');
+        btnEl.disabled = false;
+        btnEl.textContent = 'Check In Selected Slot(s)';
+      }
+    }
+  </script>
