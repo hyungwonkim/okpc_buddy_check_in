@@ -114,7 +114,7 @@
 
   <script>
     // PASTE YOUR APPS SCRIPT /exec URL BELOW:
-    const API_URL = "https://script.google.com/macros/s/AKfycbwEPjkiQ9otKQoSYEtlkWEdDLD8MTR6rXzBsTH6c7vOy8uSmtogIAC3-mBH3rDrPk_hJQ/exec";
+    const API_URL = "YOUR_APPS_SCRIPT_EXEC_URL_HERE";
 
     let appData = { activities: [], activeDates: [], participants: [] };
     let currentRoleFilter = 'ALL';
@@ -192,7 +192,6 @@
       const prevDate = dateSel.value;
       dateSel.innerHTML = '';
 
-      // Match local date YYYY-MM-DD
       const now = new Date();
       const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
       let defaultDate = appData.activeDates[0] || '';
@@ -224,6 +223,7 @@
       renderCards();
     }
 
+    // THIS IS THE MAIN renderCards() FUNCTION DEFINITION:
     function renderCards() {
       const selectedDate = document.getElementById('dateFilter').value;
       const selectedAct = document.getElementById('activityFilter').value;
@@ -246,7 +246,7 @@
       }));
 
       document.getElementById('summaryText').textContent =
-        `${filtered.length} signed-up participants (${checkedSlots}/${totalSlots} session slots checked in)`;
+        `${filtered.length} signed-up participants (${checkedSlots} session slots checked in)`;
 
       if (filtered.length === 0) {
         container.innerHTML = '<div style="text-align:center;padding:40px 16px;color:#64748b;">No signed-up participants found for this date/filter.</div>';
@@ -270,13 +270,16 @@
                 <span class="slot-status">✓ Checked In</span>
               </div>`;
           }
+          // UPDATED BLOCK (checkboxes are NOT pre-selected):
           return `
             <label class="slot-item" for="${inputId}">
               <div class="slot-left">
-                <input type="checkbox" id="${inputId}" data-pidx="${idx}" value="${s.timeSlot}" checked>
+                <input type="checkbox" id="${inputId}" data-pidx="${idx}" value="${s.timeSlot}">
                 <span>${s.timeSlot}</span>
               </div>
-              <span style="font-size:12px;color:#64748b;">Signed Up</span>
+              <span style="font-size:12px;color:${s.signedUp ? '#2563eb' : '#94a3b8'};">
+                ${s.signedUp ? 'Signed Up' : ''}
+              </span>
             </label>`;
         }).join('');
 
@@ -290,7 +293,7 @@
           <button class="btn-checkin ${allChecked ? 'all-done' : ''}"
                   ${allChecked ? 'disabled' : ''}
                   onclick="submitCardCheckIn(${idx}, this)">
-            ${allChecked ? '✓ All Signed-Up Slots Checked In' : 'Check In Selected Slot(s)'}
+            ${allChecked ? '✓ All Slots Checked In' : 'Check In Selected Slot(s)'}
           </button>
         `;
         container.appendChild(card);
@@ -304,7 +307,7 @@
       const selectedSlots = Array.from(checkboxes).map(cb => cb.value);
 
       if (selectedSlots.length === 0) {
-        alert('Please select at least one signed-up time slot.');
+        alert('Please select at least one time slot to check in.');
         return;
       }
 
